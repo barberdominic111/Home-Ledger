@@ -2,7 +2,7 @@ import React, { useState, useRef } from "react";
 import {
   Home, Plus, Clock, Settings, ChevronLeft, FileText, Check, RotateCcw,
   Paperclip, ShieldCheck, HelpCircle, Wrench, ClipboardList, Ruler, TrendingUp,
-  Download, Loader2, Layers, Settings2, Lock, X, ChevronRight,
+  Download, Loader2, Layers, Settings2, Lock, X, ChevronRight, Landmark, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Minus, Trash2,
 } from "lucide-react";
 
 /* =========================================================================
@@ -75,6 +75,41 @@ function yearsAgo(dateStr, today = new Date("2026-07-09")) {
 }
 
 /* -------------------------------------------------------------------------
+   FUNDING — how projects were paid for, and HELOC draw records.
+   Entirely manual. Funding NEVER feeds the classification engine; it only
+   powers the "potentially counts" flag, which is a reminder to look
+   closer — not tax advice and not a determination.
+     draw    = { id, date, institution, amount, note }   (a HELOC draw)
+     funding = [{ id, source, drawId?, amount }]          (on each project)
+   ------------------------------------------------------------------------- */
+const FUNDING_SOURCES = [
+  { key: "cash", label: "Cash / savings" },
+  { key: "heloc", label: "HELOC" },
+  { key: "loan", label: "Other loan" },
+  { key: "card", label: "Credit card" },
+  { key: "insurance", label: "Insurance payout" },
+  { key: "other", label: "Other" },
+];
+const SOURCE_LABEL = Object.fromEntries(FUNDING_SOURCES.map((s) => [s.key, s.label]));
+
+function helocLinks(p) { return (p.funding || []).filter((f) => f.source === "heloc"); }
+// none = not HELOC-funded; potential = HELOC-funded and looks like an improvement;
+// review = HELOC-funded but classified as repair/maintenance or unclear.
+function helocStatus(p) {
+  if (helocLinks(p).length === 0) return "none";
+  return isCapital(p) ? "potential" : "review";
+}
+const HELOC_STATUS_LABEL = { potential: "Potentially counts", review: "Worth a closer look" };
+function amountNum(v) { return Number(v) || 0; }
+function drawAllocated(drawId, projects) {
+  return projects.reduce((sum, p) =>
+    sum + (p.funding || []).filter((f) => f.drawId === drawId).reduce((s, f) => s + amountNum(f.amount), 0), 0);
+}
+function drawProjects(drawId, projects) {
+  return projects.filter((p) => (p.funding || []).some((f) => f.drawId === drawId));
+}
+
+/* -------------------------------------------------------------------------
    LOCAL RULE-BASED CLASSIFICATION ENGINE (unchanged from v1)
    ------------------------------------------------------------------------- */
 function classifyProject({ category, cost }, answers) {
@@ -126,52 +161,79 @@ const SAMPLE_PROPERTY = { address: "123 Main Street", purchaseDate: "2018-04-01"
 function seedProject(overrides) {
   return {
     id: crypto.randomUUID(),
-    description: "", documents: [], userClassification: null,
+    description: "", documents: [], userClassification: null, funding: [], rooms: [], floors: [],
     ...overrides,
   };
 }
 
+const SAMPLE_DRAWS = [
+  { id: "draw-1", date: "2021-09-02", institution: "First Federal Credit Union", amount: "36000",
+    note: "Draw for kitchen + bath work. Shows on the Sept 2021 statement." },
+  { id: "draw-2", date: "2023-09-18", institution: "First Federal Credit Union", amount: "20000",
+    note: "Window project deposit and final payment. See Oct 2023 statement." },
+  { id: "draw-3", date: "2026-01-08", institution: "First Federal Credit Union", amount: "15000",
+    note: "Primary bath remodel — the balance was paid from savings." },
+];
+
 const SAMPLE_PROJECTS = [
   seedProject({ title: "Roof Replacement", category: "Roof", date: "2019-08-10", cost: "14000",
+    rooms: ["a-storage"],
+    funding: [{ id: "f-roof-1", source: "cash", amount: "14000" }],
     description: "Full tear-off, upgraded to architectural shingles.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 81, reason: "This appears to permanently improve the property — it added something that wasn't there before and involved a larger cost." } }),
   seedProject({ title: "HVAC Replacement", category: "HVAC", date: "2020-06-01", cost: "9200",
+    rooms: ["b-utility"],
     description: "Old unit was over 15 years old, replaced with high-efficiency system.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 76, reason: "This appears to permanently improve the property — it added something that wasn't there before and involved a larger cost." } }),
   seedProject({ title: "Water Heater Repair", category: "Plumbing", date: "2020-11-15", cost: "450",
+    rooms: ["b-mech"],
     description: "Replaced heating element and thermostat.",
     aiClassification: { label: "Likely Repair / Maintenance", confidence: 68, reason: "This looks like routine upkeep, based on what you shared — it replaced an existing feature and a smaller cost." } }),
   seedProject({ title: "Kitchen Remodel", category: "Kitchen", date: "2021-09-20", cost: "32000",
+    rooms: ["f1-kitchen", "f1-dining"],
+    funding: [{ id: "f-kit-1", source: "heloc", drawId: "draw-1", amount: "32000" }],
     description: "New cabinets, counters, layout opened to dining room.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 93, reason: "This appears to permanently improve the property — it added something that wasn't there before and was connected to a larger renovation." } }),
   seedProject({ title: "Bathroom Refresh", category: "Bathroom", date: "2021-09-25", cost: "3800",
+    rooms: ["f2-bath"],
+    funding: [{ id: "f-bath-1", source: "heloc", drawId: "draw-1", amount: "3800" }],
     description: "New paint, fixtures, and vanity — same layout.",
     aiClassification: { label: "Likely Repair / Maintenance", confidence: 58, reason: "This looks like routine upkeep, based on what you shared — it replaced an existing feature." } }),
   seedProject({ title: "Electrical Panel Upgrade", category: "Electrical", date: "2022-03-14", cost: "4200",
+    rooms: ["b-utility"],
     description: "Upgraded to 200-amp service, added circuits for future EV charger.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 74, reason: "This appears to permanently improve the property — it added something that wasn't there before." } }),
   seedProject({ title: "Deck Addition", category: "Deck", date: "2022-07-01", cost: "11000",
+    rooms: ["f1-deck"],
     description: "New 300 sq ft deck off the back of the house — none existed before.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 88, reason: "This appears to permanently improve the property — it added something that wasn't there before and involved a larger cost." } }),
   seedProject({ title: "Driveway Resurfacing", category: "Driveway", date: "2023-05-10", cost: "5200",
+    rooms: ["x-driveway"],
     description: "Resurfaced existing driveway, no expansion.",
     aiClassification: { label: "Likely Repair / Maintenance", confidence: 61, reason: "This looks like routine upkeep, based on what you shared — it replaced an existing feature." } }),
   seedProject({ title: "Whole-House Window Replacement", category: "Windows", date: "2023-10-02", cost: "18500",
+    rooms: ["f1-kitchen", "f1-living", "f2-primary", "f2-bed2"],
+    funding: [{ id: "f-win-1", source: "heloc", drawId: "draw-2", amount: "18500" }],
     description: "All original single-pane windows replaced with double-pane.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 85, reason: "This appears to permanently improve the property — it involved a larger cost and went beyond original condition." } }),
   seedProject({ title: "Landscaping Overhaul", category: "Landscaping", date: "2024-04-18", cost: "7600",
+    rooms: ["x-yard"],
     description: "New hardscape patio area, plantings, and irrigation zones added.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 71, reason: "This appears to permanently improve the property — it added something that wasn't there before." } }),
   seedProject({ title: "Plumbing Leak Repair", category: "Plumbing", date: "2024-08-09", cost: "600",
+    rooms: ["f1-kitchen"],
     description: "Fixed a slow leak under the kitchen sink.",
     aiClassification: { label: "Likely Repair / Maintenance", confidence: 72, reason: "This looks like routine upkeep, based on what you shared — a smaller cost." } }),
   seedProject({ title: "First-Floor Flooring Replacement", category: "Flooring", date: "2025-02-11", cost: "9800",
+    rooms: ["f1-living", "f1-dining", "f1-entry"],
     description: "Replaced worn carpet and vinyl with luxury vinyl plank throughout.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 69, reason: "This appears to permanently improve the property — it went beyond original condition and involved a larger cost." } }),
   seedProject({ title: "Furnace Tune-Up", category: "HVAC", date: "2025-11-01", cost: "220",
     description: "Annual seasonal maintenance visit.",
     aiClassification: { label: "Likely Repair / Maintenance", confidence: 80, reason: "This looks like routine upkeep, based on what you shared — a smaller cost." } }),
   seedProject({ title: "Primary Bathroom Remodel", category: "Bathroom", date: "2026-01-15", cost: "15400",
+    rooms: ["f2-bath"],
+    funding: [{ id: "f-pbath-1", source: "heloc", drawId: "draw-3", amount: "15000" }, { id: "f-pbath-2", source: "cash", amount: "400" }],
     description: "Full gut remodel — new layout, walk-in shower added.",
     aiClassification: { label: "Likely Capital Improvement", confidence: 89, reason: "This appears to permanently improve the property — it added something that wasn't there before and was connected to a larger renovation." } }),
 ];
@@ -533,7 +595,7 @@ function ProjectRow({ project, onClick }) {
     </button>
   );
 }
-function Dashboard({ property, projects, onAdd, onOpenProject, onOpenReport }) {
+function Dashboard({ property, projects, onAdd, onOpenProject, onOpenReport, onOpenFunding }) {
   const total = projects.reduce((s, p) => s + (Number(p.cost) || 0), 0);
   const capitalTotal = projects.filter(isCapital).reduce((s, p) => s + (Number(p.cost) || 0), 0);
   const adjustedBasis = (Number(property.purchasePrice) || 0) + capitalTotal;
@@ -557,6 +619,7 @@ function Dashboard({ property, projects, onAdd, onOpenProject, onOpenReport }) {
       <div className="px-5 space-y-2.5">
         <BigButton icon={Plus} onClick={onAdd}>Add a project</BigButton>
         <BigButton icon={Ruler} variant="brass" onClick={onOpenReport}>View home report</BigButton>
+        <BigButton icon={Landmark} variant="ghost" onClick={onOpenFunding}>Funding &amp; HELOC</BigButton>
       </div>
       <div className="px-5 mt-6 flex-1 overflow-auto pb-4">
         <div className="text-[12px] font-semibold tracking-wide mb-2" style={{ color: COLOR.inkSoft }}>RECENT PROJECTS</div>
@@ -578,13 +641,15 @@ function Dashboard({ property, projects, onAdd, onOpenProject, onOpenReport }) {
 /* -------------------------------------------------------------------------
    ADD PROJECT
    ------------------------------------------------------------------------- */
-function AddProject({ onCancel, onNext }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [cost, setCost] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
-  const [documents, setDocuments] = useState([]);
+function AddProject({ initial, draws, layouts, onCreateDraw, onCancel, onNext }) {
+  const [title, setTitle] = useState(initial?.title || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [date, setDate] = useState(initial?.date || new Date().toISOString().slice(0, 10));
+  const [cost, setCost] = useState(initial?.cost || "");
+  const [category, setCategory] = useState(initial?.category || CATEGORIES[0]);
+  const [documents, setDocuments] = useState(initial?.documents || []);
+  const [funding, setFunding] = useState(initial?.funding || []);
+  const [where, setWhere] = useState({ rooms: initial?.rooms || [], floors: initial?.floors || [] });
   const fileRef = useRef(null);
 
   function handleFiles(e) {
@@ -631,6 +696,12 @@ function AddProject({ onCancel, onNext }) {
             placeholder="Anything worth remembering about this project" rows={3}
             style={inputStyle} className="w-full px-3.5 py-3 rounded-lg text-[14px] outline-none resize-none" />
         </Field>
+        <Field label="Where in the house (optional)">
+          <LocationEditor value={where} layouts={layouts} category={category} onChange={setWhere} />
+        </Field>
+        <Field label="Paid with (optional)">
+          <FundingEditor funding={funding} draws={draws} projectCost={cost} onChange={setFunding} onCreateDraw={onCreateDraw} />
+        </Field>
         <Field label="Documentation (optional)">
           <button onClick={() => fileRef.current?.click()} style={{ border: `1.5px dashed ${COLOR.line}`, color: COLOR.inkSoft }}
             className="w-full py-4 rounded-lg flex items-center justify-center gap-2 text-[13px]">
@@ -650,7 +721,7 @@ function AddProject({ onCancel, onNext }) {
         </Field>
       </div>
       <div className="px-5 pb-6 pt-3" style={{ borderTop: `1px solid ${COLOR.line}` }}>
-        <BigButton disabled={!canContinue} onClick={() => onNext({ title, description, date, cost, category, documents })}>
+        <BigButton disabled={!canContinue} onClick={() => onNext({ title, description, date, cost, category, documents, funding, rooms: where.rooms, floors: where.floors })}>
           Continue to categorizing
         </BigButton>
       </div>
@@ -780,7 +851,12 @@ function ResultCard({ draft, result, onConfirm, onRedo }) {
 /* -------------------------------------------------------------------------
    PROJECT DETAIL
    ------------------------------------------------------------------------- */
-function ProjectDetail({ project, onBack }) {
+function ProjectDetail({ project, draws, layouts, onBack, onUpdateFunding, onUpdateLocation, onCreateDraw }) {
+  const [editingWhere, setEditingWhere] = useState(false);
+  const [whereDraft, setWhereDraft] = useState({ rooms: [], floors: [] });
+  const [editingFunding, setEditingFunding] = useState(false);
+  const [fundingDraft, setFundingDraft] = useState([]);
+  const hStatus = helocStatus(project);
   const cls = finalClass(project);
   const tone = cls?.includes("Capital") ? "teal" : cls?.includes("Repair") ? "brass" : "ink";
   return (
@@ -811,6 +887,60 @@ function ProjectDetail({ project, onBack }) {
             <p className="text-[13.5px] leading-relaxed mt-1.5" style={{ color: COLOR.inkSoft }}>{project.aiClassification.reason}</p>
           </div>
         )}
+        <div className="mt-5">
+          <div className="flex items-center justify-between">
+            <div className="text-[12px] font-semibold tracking-wide" style={{ color: COLOR.inkSoft }}>WHERE IN THE HOUSE</div>
+            {!editingWhere && (
+              <button onClick={() => { setWhereDraft({ rooms: project.rooms || [], floors: project.floors || [] }); setEditingWhere(true); }}
+                style={{ color: COLOR.teal }} className="text-[12.5px] font-semibold">Edit</button>
+            )}
+          </div>
+          {editingWhere ? (
+            <div className="mt-2.5">
+              <LocationEditor value={whereDraft} layouts={layouts} category={project.category} onChange={setWhereDraft} />
+              <div className="space-y-2 mt-3">
+                <BigButton onClick={() => { onUpdateLocation(project.id, whereDraft); setEditingWhere(false); }}>Save location</BigButton>
+                <BigButton variant="ghost" onClick={() => setEditingWhere(false)}>Cancel</BigButton>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {projectPlacements(project, layouts).map((pl) => (
+                pl.inferred
+                  ? <span key="inf" style={{ color: COLOR.inkSoft }} className="text-[12.5px] leading-relaxed">Not placed in a room yet — shown on the {FLOOR_LABEL[pl.level]} based on its category.</span>
+                  : <Pill key={`${pl.level}-${pl.roomId}`} tone="teal">{placementLabel(pl, layouts)}</Pill>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="mt-5">
+          <div className="flex items-center justify-between">
+            <div className="text-[12px] font-semibold tracking-wide" style={{ color: COLOR.inkSoft }}>FUNDING</div>
+            {!editingFunding && (
+              <button onClick={() => { setFundingDraft(project.funding || []); setEditingFunding(true); }}
+                style={{ color: COLOR.teal }} className="text-[12.5px] font-semibold">
+                {(project.funding || []).length ? "Edit" : "Add"}
+              </button>
+            )}
+          </div>
+          {hStatus !== "none" && !editingFunding && (
+            <div className="mt-2">
+              <Pill tone={hStatus === "potential" ? "teal" : "brass"}>{HELOC_STATUS_LABEL[hStatus]}</Pill>
+              <p style={{ color: COLOR.inkSoft }} className="text-[11.5px] mt-1.5 leading-relaxed">
+                A reminder, not tax advice — a tax professional can confirm what qualifies.
+              </p>
+            </div>
+          )}
+          {editingFunding ? (
+            <div className="mt-2.5">
+              <FundingEditor funding={fundingDraft} draws={draws} projectCost={project.cost} onChange={setFundingDraft} onCreateDraw={onCreateDraw} />
+              <div className="space-y-2 mt-3">
+                <BigButton onClick={() => { onUpdateFunding(project.id, fundingDraft); setEditingFunding(false); }}>Save funding</BigButton>
+                <BigButton variant="ghost" onClick={() => setEditingFunding(false)}>Cancel</BigButton>
+              </div>
+            </div>
+          ) : <FundingList project={project} draws={draws} />}
+        </div>
         <div className="mt-5">
           <div className="text-[12px] font-semibold tracking-wide" style={{ color: COLOR.inkSoft }}>DOCUMENTS ({project.documents.length})</div>
           {project.documents.length === 0 ? (
@@ -914,6 +1044,772 @@ function SettingsScreen({ property, onReset, onExport, exportState }) {
 }
 
 /* -------------------------------------------------------------------------
+   FUNDING UI — draw form, per-project funding editor, and the Funding screen
+   (with the HELOC filter). All manual entry; amounts are optional.
+   ------------------------------------------------------------------------- */
+function fmtDate(str) {
+  if (!str) return "";
+  const [y, m, d] = str.split("-").map(Number);
+  if (!y) return str;
+  return new Date(y, m - 1, d || 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function DrawForm({ initial, linkedProjects = [], onSave, onCancel, onDelete }) {
+  const [institution, setInstitution] = useState(initial?.institution || "");
+  const [date, setDate] = useState(initial?.date || new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState(initial?.amount || "");
+  const [note, setNote] = useState(initial?.note || "");
+  const canSave = institution.trim().length > 1;
+  return (
+    <div className="space-y-3">
+      <Field label="Institution">
+        <input value={institution} onChange={(e) => setInstitution(e.target.value)} placeholder="First Federal Credit Union"
+          style={inputStyle} className="w-full px-3.5 py-3 rounded-lg text-[15px] outline-none" />
+      </Field>
+      <div className="flex gap-3">
+        <Field label="Date" className="flex-1">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            style={inputStyle} className="w-full px-3.5 py-3 rounded-lg text-[15px] outline-none" />
+        </Field>
+        <Field label="Amount (optional)" className="flex-1">
+          <input value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="20000"
+            style={inputStyle} className="w-full px-3.5 py-3 rounded-lg text-[15px] outline-none" />
+        </Field>
+      </div>
+      <Field label="Note — what to look for in your bank documents">
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
+          placeholder="e.g. statement month, check or confirmation number"
+          style={inputStyle} className="w-full px-3.5 py-3 rounded-lg text-[14px] outline-none resize-none" />
+      </Field>
+      {linkedProjects.length > 0 && (
+        <div>
+          <div className="text-[12px] font-medium" style={{ color: COLOR.inkSoft }}>Tied to</div>
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {linkedProjects.map((p) => <Pill key={p.id} tone="teal">{p.title}</Pill>)}
+          </div>
+        </div>
+      )}
+      <div className="space-y-2 pt-1">
+        <BigButton disabled={!canSave} onClick={() => onSave({ institution: institution.trim(), date, amount, note: note.trim() })}>
+          Save draw
+        </BigButton>
+        <BigButton variant="ghost" onClick={onCancel}>Cancel</BigButton>
+        {onDelete && (
+          <button onClick={onDelete} style={{ color: COLOR.rust }} className="w-full py-2 text-[13px] font-medium">
+            Remove this draw (also unlinks it from projects)
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Used in Add Project and in Project Detail's edit mode.
+function FundingEditor({ funding, draws, projectCost, onChange, onCreateDraw }) {
+  const [helocOpen, setHelocOpen] = useState(funding.some((f) => f.source === "heloc"));
+  const [newDraw, setNewDraw] = useState(false);
+  const has = (src) => funding.some((f) => f.source === src);
+  const sortedDraws = [...draws].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  function toggleSource(key) {
+    if (key === "heloc") {
+      if (helocOpen) { onChange(funding.filter((f) => f.source !== "heloc")); setHelocOpen(false); setNewDraw(false); }
+      else setHelocOpen(true);
+      return;
+    }
+    if (has(key)) onChange(funding.filter((f) => f.source !== key));
+    else onChange([...funding, { id: crypto.randomUUID(), source: key, amount: "" }]);
+  }
+  function setAmount(id, v) {
+    onChange(funding.map((f) => (f.id === id ? { ...f, amount: v.replace(/[^0-9]/g, "") } : f)));
+  }
+  function toggleDraw(drawId) {
+    const existing = funding.find((f) => f.drawId === drawId);
+    if (existing) onChange(funding.filter((f) => f.id !== existing.id));
+    else onChange([...funding, { id: crypto.randomUUID(), source: "heloc", drawId, amount: "" }]);
+  }
+  function handleCreate(data) {
+    const created = onCreateDraw(data);
+    onChange([...funding, { id: crypto.randomUUID(), source: "heloc", drawId: created.id, amount: "" }]);
+    setNewDraw(false);
+  }
+  const amountInput = (f) => (
+    <input value={f.amount} onChange={(e) => setAmount(f.id, e.target.value)} inputMode="numeric"
+      placeholder={projectCost || "Amount"} style={{ ...inputStyle, width: 92 }}
+      className="px-2.5 py-1.5 rounded-lg text-[13px] outline-none text-right" />
+  );
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2">
+        {FUNDING_SOURCES.map((s) => {
+          const active = s.key === "heloc" ? helocOpen : has(s.key);
+          return (
+            <button key={s.key} onClick={() => toggleSource(s.key)}
+              style={{ background: active ? COLOR.teal : COLOR.card, color: active ? "#fff" : COLOR.ink, border: `1.5px solid ${active ? COLOR.teal : COLOR.line}` }}
+              className="px-3 py-1.5 rounded-full text-[12.5px] font-medium">
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {funding.filter((f) => f.source !== "heloc").length > 0 && (
+        <div className="mt-3 space-y-2">
+          {funding.filter((f) => f.source !== "heloc").map((f) => (
+            <div key={f.id} className="flex items-center justify-between">
+              <span className="text-[13px]">{SOURCE_LABEL[f.source]}</span>
+              {amountInput(f)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {helocOpen && (
+        <div style={{ background: COLOR.card, border: `1.5px solid ${COLOR.line}` }} className="rounded-xl p-3 mt-3 space-y-2">
+          <div className="text-[12px] font-medium" style={{ color: COLOR.inkSoft }}>Which HELOC draw paid for this?</div>
+          {sortedDraws.length === 0 && !newDraw && (
+            <p style={{ color: COLOR.inkSoft }} className="text-[12.5px]">No draws recorded yet — add one below.</p>
+          )}
+          {sortedDraws.map((d) => {
+            const link = funding.find((f) => f.drawId === d.id);
+            return (
+              <div key={d.id} className="flex items-center gap-2">
+                <button onClick={() => toggleDraw(d.id)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
+                  <div style={{ background: link ? COLOR.teal : "transparent", border: `1.5px solid ${link ? COLOR.teal : COLOR.line}` }}
+                    className="w-5 h-5 rounded flex items-center justify-center shrink-0">
+                    {link && <Check size={13} color="#fff" />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium truncate">{d.institution}</div>
+                    <div style={{ color: COLOR.inkSoft }} className="text-[11.5px] truncate">
+                      {fmtDate(d.date)}{d.amount ? ` · ${currency(d.amount)}` : ""}
+                    </div>
+                  </div>
+                </button>
+                {link && amountInput(link)}
+              </div>
+            );
+          })}
+          {newDraw ? (
+            <div style={{ borderTop: `1px solid ${COLOR.line}` }} className="pt-3">
+              <DrawForm onSave={handleCreate} onCancel={() => setNewDraw(false)} />
+            </div>
+          ) : (
+            <button onClick={() => setNewDraw(true)} style={{ color: COLOR.teal }} className="text-[13px] font-semibold flex items-center gap-1 pt-1">
+              <Plus size={14} /> New draw
+            </button>
+          )}
+        </div>
+      )}
+      <p style={{ color: COLOR.inkSoft }} className="text-[11.5px] mt-2 leading-relaxed">
+        Amounts are optional. This is just a record of where the money came from.
+      </p>
+    </div>
+  );
+}
+
+// Read-only funding summary for Project Detail.
+function FundingList({ project, draws }) {
+  const items = project.funding || [];
+  if (items.length === 0) {
+    return <p style={{ color: COLOR.inkSoft }} className="text-[13px] mt-1.5">No funding details added yet — that's okay, it's optional.</p>;
+  }
+  return (
+    <div className="space-y-2 mt-2">
+      {items.map((f) => {
+        const d = f.drawId ? draws.find((x) => x.id === f.drawId) : null;
+        return (
+          <div key={f.id} style={{ background: COLOR.card, border: `1px solid ${COLOR.line}` }} className="rounded-lg px-3.5 py-2.5">
+            <div className="flex items-center justify-between">
+              <div className="text-[13.5px] font-medium">{SOURCE_LABEL[f.source]}{d ? ` · ${d.institution}` : ""}</div>
+              {f.amount && <div style={{ fontFamily: "IBM Plex Mono, monospace" }} className="text-[13px] font-semibold">{currency(f.amount)}</div>}
+            </div>
+            {d && (
+              <div style={{ color: COLOR.inkSoft }} className="text-[12px] mt-0.5 leading-relaxed">
+                Draw dated {fmtDate(d.date)}{d.note ? ` — ${d.note}` : ""}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const FUNDING_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "heloc", label: "HELOC-funded" },
+  { key: "potential", label: "Potentially counts" },
+  { key: "review", label: "Worth a closer look" },
+  { key: "none", label: "No HELOC" },
+];
+
+function FundingScreen({ projects, draws, onBack, onOpenProject, onSaveDraw, onDeleteDraw }) {
+  const [tab, setTab] = useState("projects");
+  const [filter, setFilter] = useState("all");
+  const [editing, setEditing] = useState(null); // null | "new" | draw
+
+  const matches = (p, key) => key === "all" || (key === "heloc" ? helocStatus(p) !== "none" : helocStatus(p) === key);
+  const filtered = [...projects].filter((p) => matches(p, filter)).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const potential = projects.filter((p) => helocStatus(p) === "potential");
+  const potentialAmt = potential.reduce((s, p) => s + helocLinks(p).reduce((x, f) => x + amountNum(f.amount), 0), 0);
+  const drawsTotal = draws.reduce((s, d) => s + amountNum(d.amount), 0);
+
+  return (
+    <Screen>
+      <Header title="Funding" onBack={onBack} />
+      <div className="flex-1 overflow-auto px-5 py-4">
+        <div style={{ background: COLOR.paperDark }} className="rounded-lg p-3 flex gap-2 items-start">
+          <HelpCircle size={15} style={{ color: COLOR.inkSoft, marginTop: 1 }} className="shrink-0" />
+          <p style={{ color: COLOR.inkSoft }} className="text-[12px] leading-relaxed">
+            A flag here is a reminder to look closer, not a determination. Whether HELOC funds qualify for any
+            purpose depends on your situation — a tax professional can confirm.
+          </p>
+        </div>
+
+        <div style={{ background: COLOR.card, border: `1.5px solid ${COLOR.line}` }} className="rounded-xl overflow-hidden mt-4">
+          <LedgerRow label="HELOC draws recorded" value={String(draws.length)} sub={drawsTotal ? `${currency(drawsTotal)} total` : null} />
+          <LedgerRow label="Potentially count" value={String(potential.length)} sub={potentialAmt ? `${currency(potentialAmt)} tied from draws` : "projects"} noBorder />
+        </div>
+
+        <div className="flex gap-2 mt-4">
+          {[{ key: "projects", label: "Projects" }, { key: "draws", label: "HELOC draws" }].map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              style={{ background: tab === t.key ? COLOR.teal : "transparent", color: tab === t.key ? "#fff" : COLOR.inkSoft, border: `1.5px solid ${tab === t.key ? COLOR.teal : COLOR.line}` }}
+              className="flex-1 py-2 rounded-full text-[12.5px] font-semibold">{t.label}</button>
+          ))}
+        </div>
+
+        {tab === "projects" ? (
+          <>
+            <div className="flex gap-1.5 overflow-x-auto mt-3 pb-1">
+              {FUNDING_FILTERS.map((f) => {
+                const count = projects.filter((p) => matches(p, f.key)).length;
+                return (
+                  <button key={f.key} onClick={() => setFilter(f.key)}
+                    style={{ background: filter === f.key ? COLOR.brass : "transparent", color: filter === f.key ? "#fff" : COLOR.inkSoft, border: `1.5px solid ${filter === f.key ? COLOR.brass : COLOR.line}` }}
+                    className="px-3 py-1.5 rounded-full text-[11.5px] font-semibold whitespace-nowrap shrink-0">
+                    {f.label} · {count}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="space-y-2.5 mt-3">
+              {filtered.length === 0 && <p style={{ color: COLOR.inkSoft }} className="text-[13px] text-center py-6">No projects match this filter.</p>}
+              {filtered.map((p) => {
+                const st = helocStatus(p);
+                const srcs = [...new Set((p.funding || []).map((f) => SOURCE_LABEL[f.source]))];
+                return (
+                  <button key={p.id} onClick={() => onOpenProject(p.id)} style={{ background: COLOR.card, border: `1.5px solid ${COLOR.line}` }}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-lg text-left">
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-medium truncate">{p.title}</div>
+                      <div style={{ color: COLOR.inkSoft }} className="text-[12px] truncate">
+                        {yearOf(p.date)} · {srcs.length ? srcs.join(" + ") : "No funding noted"}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-2">
+                      <div style={{ fontFamily: "IBM Plex Mono, monospace" }} className="text-[14px] font-semibold">{currency(p.cost)}</div>
+                      {st !== "none" && <Pill tone={st === "potential" ? "teal" : "brass"}>{HELOC_STATUS_LABEL[st]}</Pill>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="mt-3 space-y-2.5">
+            <BigButton icon={Plus} onClick={() => setEditing("new")}>Add a draw</BigButton>
+            {draws.length === 0 && <p style={{ color: COLOR.inkSoft }} className="text-[13px] text-center py-4">No draws recorded yet.</p>}
+            {[...draws].sort((a, b) => new Date(b.date) - new Date(a.date)).map((d) => {
+              const allocated = drawAllocated(d.id, projects);
+              const left = amountNum(d.amount) - allocated;
+              const linked = drawProjects(d.id, projects);
+              let status = `${currency(allocated)} tied to projects`;
+              if (d.amount) status = left > 0 ? `${currency(left)} not yet tied to a project`
+                : left < 0 ? `Tied amounts are ${currency(-left)} over this draw — worth a double-check` : "Fully tied to projects";
+              return (
+                <button key={d.id} onClick={() => setEditing(d)} style={{ background: COLOR.card, border: `1.5px solid ${COLOR.line}` }}
+                  className="w-full rounded-lg px-4 py-3 text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[14px] font-medium truncate">{d.institution}</div>
+                    {d.amount && <div style={{ fontFamily: "IBM Plex Mono, monospace" }} className="text-[14px] font-semibold">{currency(d.amount)}</div>}
+                  </div>
+                  <div style={{ color: COLOR.inkSoft }} className="text-[12px] mt-0.5">{fmtDate(d.date)} · {status}</div>
+                  {d.note && <div style={{ color: COLOR.inkSoft }} className="text-[12px] mt-1 leading-relaxed">{d.note}</div>}
+                  {linked.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">{linked.map((p) => <Pill key={p.id} tone="teal">{p.title}</Pill>)}</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <div className="absolute inset-0 z-30">
+          <Screen>
+            <Header title={editing === "new" ? "New draw" : "Edit draw"} onBack={() => setEditing(null)} />
+            <div className="flex-1 overflow-auto px-5 py-5">
+              <DrawForm
+                initial={editing === "new" ? null : editing}
+                linkedProjects={editing === "new" ? [] : drawProjects(editing.id, projects)}
+                onSave={(data) => { onSaveDraw(data, editing === "new" ? undefined : editing.id); setEditing(null); }}
+                onCancel={() => setEditing(null)}
+                onDelete={editing === "new" ? null : () => { onDeleteDraw(editing.id); setEditing(null); }}
+              />
+            </div>
+          </Screen>
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+/* -------------------------------------------------------------------------
+   FLOORS & ROOMS — user-editable floor layouts, projects tied to rooms,
+   and the pivot-style "Floors" report (floor → room → project).
+     layouts   = { [level]: [{ id, name, x, y, w, h }] }   grid units, 12 × 8
+     project   = { …, rooms: [roomId], floors: [level] }
+                 rooms  = specific rooms the work touched
+                 floors = "whole floor" placements (no specific room)
+   A project with neither falls back to the floor its category usually
+   lives on (LEVEL_OF_CATEGORY) and shows as "Not placed in a room".
+   ------------------------------------------------------------------------- */
+// LAYOUT-LOGIC-START
+const GRID_COLS = 12, GRID_ROWS = 8;
+function clampRect(r) {
+  const w = Math.max(1, Math.min(GRID_COLS, r.w)), h = Math.max(1, Math.min(GRID_ROWS, r.h));
+  const x = Math.max(0, Math.min(GRID_COLS - w, r.x)), y = Math.max(0, Math.min(GRID_ROWS - h, r.y));
+  return { ...r, x, y, w, h };
+}
+function rectsOverlap(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
+function collides(rect, rooms, ignoreId) { return rooms.some((o) => o.id !== ignoreId && rectsOverlap(rect, o)); }
+function findFreeSpot(rooms) {
+  for (const [w, h] of [[3, 2], [2, 2], [2, 1], [1, 1]])
+    for (let y = 0; y + h <= GRID_ROWS; y++)
+      for (let x = 0; x + w <= GRID_COLS; x++)
+        if (!collides({ x, y, w, h }, rooms, null)) return { x, y, w, h };
+  return null;
+}
+// LAYOUT-LOGIC-END
+
+const CELL = 20, GPAD = 6;
+const FLOOR_ORDER = ["attic", "2nd", "1st", "basement", "exterior"];
+const FLOOR_LABEL = { attic: "Attic", "2nd": "2nd Floor", "1st": "1st Floor", basement: "Basement", exterior: "Exterior" };
+const DEFAULT_LAYOUTS = {
+  // Starter layouts leave the bottom two grid rows open so "Add a room" works right away.
+  attic: [{ id: "a-storage", name: "Attic Storage", x: 0, y: 0, w: 12, h: 6 }],
+  "2nd": [
+    { id: "f2-primary", name: "Primary Bedroom", x: 0, y: 0, w: 6, h: 3 },
+    { id: "f2-bath", name: "Primary Bath", x: 6, y: 0, w: 6, h: 3 },
+    { id: "f2-bed2", name: "Bedroom 2", x: 0, y: 3, w: 5, h: 3 },
+    { id: "f2-hall", name: "Hall", x: 5, y: 3, w: 7, h: 3 },
+  ],
+  "1st": [
+    { id: "f1-kitchen", name: "Kitchen", x: 0, y: 0, w: 5, h: 3 },
+    { id: "f1-living", name: "Living Room", x: 5, y: 0, w: 7, h: 3 },
+    { id: "f1-entry", name: "Entry", x: 0, y: 3, w: 3, h: 3 },
+    { id: "f1-dining", name: "Dining", x: 3, y: 3, w: 5, h: 3 },
+    { id: "f1-deck", name: "Deck / Patio", x: 8, y: 3, w: 4, h: 3 },
+  ],
+  basement: [
+    { id: "b-utility", name: "Utility Room", x: 0, y: 0, w: 6, h: 4 },
+    { id: "b-mech", name: "Mechanical", x: 6, y: 0, w: 6, h: 4 },
+    { id: "b-storage", name: "Storage", x: 0, y: 4, w: 12, h: 2 },
+  ],
+  exterior: [
+    { id: "x-driveway", name: "Driveway", x: 0, y: 0, w: 5, h: 6 },
+    { id: "x-yard", name: "Yard", x: 5, y: 0, w: 7, h: 6 },
+  ],
+};
+function cloneRooms(rooms) { return rooms.map((r) => ({ ...r })); }
+function cloneLayouts(l) { return Object.fromEntries(Object.entries(l).map(([k, v]) => [k, cloneRooms(v)])); }
+function fitName(name, wCells) {
+  const max = Math.max(3, Math.floor((wCells * CELL - 6) / 5));
+  const n = name || "Room";
+  return n.length > max ? n.slice(0, max - 1) + "…" : n;
+}
+
+function findRoom(layouts, roomId) {
+  for (const level of FLOOR_ORDER) {
+    const room = (layouts[level] || []).find((r) => r.id === roomId);
+    if (room) return { level, room };
+  }
+  return null;
+}
+// Every place a project shows up: [{ level, roomId|null, inferred? }]. Always at least one.
+function projectPlacements(p, layouts) {
+  const out = [], seen = new Set();
+  (p.rooms || []).forEach((id) => {
+    const f = findRoom(layouts, id);
+    if (f && !seen.has(id)) { seen.add(id); out.push({ level: f.level, roomId: id }); }
+  });
+  (p.floors || []).forEach((lv) => {
+    if (layouts[lv] && !out.some((o) => o.level === lv && !o.roomId)) out.push({ level: lv, roomId: null });
+  });
+  if (out.length === 0) out.push({ level: LEVEL_OF_CATEGORY[p.category] || "1st", roomId: null, inferred: true });
+  return out;
+}
+function roomProjects(roomId, projects, layouts) {
+  return projects.filter((p) => projectPlacements(p, layouts).some((x) => x.roomId === roomId));
+}
+function placementLabel(pl, layouts) {
+  const room = pl.roomId ? findRoom(layouts, pl.roomId)?.room : null;
+  return `${FLOOR_LABEL[pl.level]} · ${room ? room.name : "whole floor"}`;
+}
+function availableLevelsFor(features) {
+  return FLOOR_ORDER.filter((lv) =>
+    lv === "1st" || lv === "exterior" || (lv === "2nd" ? features.secondFloor : lv === "attic" ? features.attic : features.basement));
+}
+
+// Pivot: floor → room → projects. A project that touches several rooms
+// counts once in each (and once per floor); its cost is split evenly
+// across its placements so every level's spend adds up to the whole.
+function buildPivot(projects, layouts, levels) {
+  return levels.map((level) => {
+    const rooms = (layouts[level] || []).map((room) => ({ room, items: [] }));
+    const unplaced = [];
+    projects.forEach((p) => {
+      const pl = projectPlacements(p, layouts);
+      const share = (Number(p.cost) || 0) / pl.length;
+      pl.filter((x) => x.level === level).forEach((x) => {
+        const entry = { project: p, share };
+        const slot = x.roomId ? rooms.find((r) => r.room.id === x.roomId) : null;
+        (slot ? slot.items : unplaced).push(entry);
+      });
+    });
+    const sum = (items) => items.reduce((s, e) => s + e.share, 0);
+    const roomRows = rooms.map((r) => ({ ...r, count: r.items.length, spend: sum(r.items) }));
+    const ids = new Set([...rooms.flatMap((r) => r.items), ...unplaced].map((e) => e.project.id));
+    return {
+      level, rooms: roomRows, unplaced: { items: unplaced, count: unplaced.length, spend: sum(unplaced) },
+      count: ids.size, spend: sum(roomRows.flatMap((r) => r.items)) + sum(unplaced),
+    };
+  });
+}
+
+const MONO = "IBM Plex Mono, monospace";
+function PivotLine({ entry, onOpen }) {
+  const p = entry.project, cls = finalClass(p);
+  const split = Math.abs(entry.share - (Number(p.cost) || 0)) > 0.5;
+  return (
+    <button onClick={() => onOpen(p.id)} style={{ background: BLUE.bgDeep, border: `1px solid ${BLUE.line}` }}
+      className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left">
+      <div className="min-w-0">
+        <div style={{ color: BLUE.bright }} className="text-[12.5px] font-medium truncate">{p.title}</div>
+        <div style={{ color: BLUE.dim }} className="text-[11px]">{shortDate(p.date)}{cls ? ` · ${cls.replace("Likely ", "")}` : ""}</div>
+      </div>
+      <div className="text-right shrink-0 ml-2">
+        <div style={{ fontFamily: MONO, color: BLUE.bright }} className="text-[12px] font-semibold">{currency(entry.share)}</div>
+        {split && <div style={{ color: BLUE.dim }} className="text-[10px]">of {currency(p.cost)}</div>}
+      </div>
+    </button>
+  );
+}
+function Chev({ open }) {
+  return <ChevronRight size={14} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />;
+}
+
+function FloorsPivot({ projects, layouts, levels, expanded, setExpanded, onOpenProject, onEditLayout }) {
+  const pivot = buildPivot(projects, layouts, levels);
+  const total = projects.reduce((s, p) => s + (Number(p.cost) || 0), 0);
+  const toggle = (key) => setExpanded((e) => ({ ...e, [key]: !e[key] }));
+  const anyOpen = Object.values(expanded).some(Boolean);
+  function expandAll() {
+    const all = {};
+    pivot.forEach((f) => {
+      all[`f:${f.level}`] = true;
+      f.rooms.forEach((r) => { if (r.count) all[`r:${r.room.id}`] = true; });
+      if (f.unplaced.count) all[`u:${f.level}`] = true;
+    });
+    setExpanded(all);
+  }
+  const numCols = (count, spend, dim) => (
+    <>
+      <span style={{ fontFamily: MONO, color: dim ? BLUE.dim : BLUE.bright }} className="w-9 text-right text-[13px] font-semibold">{count || "–"}</span>
+      <span style={{ fontFamily: MONO, color: dim ? BLUE.dim : BLUE.bright }} className="w-[74px] text-right text-[12px]">{count ? currency(spend) : ""}</span>
+    </>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p style={{ color: BLUE.dim }} className="text-[11.5px] leading-relaxed pr-3">Tap a floor to see its rooms, and a room to see its projects.</p>
+        <button onClick={() => (anyOpen ? setExpanded({}) : expandAll())} style={{ color: BLUE.brass }} className="text-[11.5px] font-semibold whitespace-nowrap">
+          {anyOpen ? "Collapse all" : "Expand all"}
+        </button>
+      </div>
+
+      <div style={{ background: BLUE.bgDeep, border: `1px solid ${BLUE.brass}` }} className="rounded-xl px-3.5 py-3 flex items-center">
+        <span style={{ fontFamily: "Fraunces, serif", color: BLUE.bright }} className="flex-1 text-[14.5px] font-semibold">Whole house</span>
+        <span className="flex items-center gap-1">
+          <span style={{ fontFamily: MONO, color: BLUE.brass }} className="w-9 text-right text-[13px] font-semibold">{projects.length}</span>
+          <span style={{ fontFamily: MONO, color: BLUE.brass }} className="w-[74px] text-right text-[12px] font-semibold">{currency(total)}</span>
+        </span>
+      </div>
+      <div className="flex justify-end gap-1 pr-3.5 -mb-1">
+        <span style={{ color: BLUE.dim }} className="w-9 text-right text-[10px] tracking-wide">PROJ.</span>
+        <span style={{ color: BLUE.dim }} className="w-[74px] text-right text-[10px] tracking-wide">SPEND</span>
+      </div>
+
+      {pivot.map((f) => {
+        const open = !!expanded[`f:${f.level}`];
+        return (
+          <div key={f.level} style={{ background: BLUE.card, border: `1px solid ${BLUE.line}` }} className="rounded-xl overflow-hidden">
+            <button onClick={() => toggle(`f:${f.level}`)} style={{ color: BLUE.bright }} className="w-full flex items-center gap-2 px-3.5 py-3 text-left">
+              <Chev open={open} />
+              <span style={{ fontFamily: "Fraunces, serif" }} className="flex-1 text-[14.5px] font-semibold">{FLOOR_LABEL[f.level]}</span>
+              <span className="flex items-center gap-1">{numCols(f.count, f.spend)}</span>
+            </button>
+            {open && (
+              <div style={{ borderTop: `1px solid ${BLUE.line}` }} className="px-3 pb-3 pt-2 space-y-1.5">
+                {f.rooms.map((r) => {
+                  const rOpen = !!expanded[`r:${r.room.id}`] && r.count > 0;
+                  return (
+                    <div key={r.room.id}>
+                      <button onClick={() => r.count && toggle(`r:${r.room.id}`)} style={{ color: r.count ? BLUE.bright : BLUE.dim }}
+                        className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left">
+                        {r.count ? <Chev open={rOpen} /> : <span className="w-[14px]" />}
+                        <span className="flex-1 text-[13px] truncate">{r.room.name}</span>
+                        <span className="flex items-center gap-1">{numCols(r.count, r.spend, true)}</span>
+                      </button>
+                      {rOpen && <div className="pl-6 space-y-1.5 pb-1">{r.items.map((e) => <PivotLine key={e.project.id} entry={e} onOpen={onOpenProject} />)}</div>}
+                    </div>
+                  );
+                })}
+                {f.unplaced.count > 0 && (
+                  <div>
+                    <button onClick={() => toggle(`u:${f.level}`)} style={{ color: BLUE.bright }} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left">
+                      <Chev open={!!expanded[`u:${f.level}`]} />
+                      <span style={{ fontStyle: "italic" }} className="flex-1 text-[13px]">Not placed in a room</span>
+                      <span className="flex items-center gap-1">{numCols(f.unplaced.count, f.unplaced.spend, true)}</span>
+                    </button>
+                    {expanded[`u:${f.level}`] && (
+                      <div className="pl-6 space-y-1.5 pb-1">
+                        {f.unplaced.items.map((e) => <PivotLine key={e.project.id} entry={e} onOpen={onOpenProject} />)}
+                        <p style={{ color: BLUE.dim }} className="text-[11px] leading-relaxed">Open a project and choose its rooms to place it.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <button onClick={() => onEditLayout(f.level)} style={{ color: BLUE.brass }} className="text-[12.5px] font-semibold pt-1 px-2">
+                  Edit {FLOOR_LABEL[f.level]} layout
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <p style={{ color: BLUE.dim }} className="text-[11px] leading-relaxed">
+        A project that spans several rooms or floors is counted in each, and its cost is split evenly between them — so floor totals add up to the whole house.
+      </p>
+    </div>
+  );
+}
+
+// Simple block editor: tap a block to select it, drag to move, drag the
+// corner to resize — or use the buttons below for precise changes.
+function LayoutEditor({ level, rooms, projects, layouts, onChange, onReset, onClose }) {
+  const [selectedId, setSelectedId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [full, setFull] = useState(false);
+  const svgRef = useRef(null);
+  const dragRef = useRef(null);
+  const selected = rooms.find((r) => r.id === selectedId) || null;
+  const vbW = GRID_COLS * CELL + GPAD * 2, vbH = GRID_ROWS * CELL + GPAD * 2;
+
+  function tryRect(id, patch) {
+    const base = rooms.find((r) => r.id === id);
+    if (!base) return false;
+    const lim = { ...patch };
+    if (lim.w !== undefined && lim.x === undefined) lim.w = Math.min(lim.w, GRID_COLS - base.x);
+    if (lim.h !== undefined && lim.y === undefined) lim.h = Math.min(lim.h, GRID_ROWS - base.y);
+    const c = clampRect({ ...base, ...lim });
+    if (collides(c, rooms, id)) return false;
+    if (c.x === base.x && c.y === base.y && c.w === base.w && c.h === base.h) return true;
+    onChange(rooms.map((r) => (r.id === id ? { ...r, x: c.x, y: c.y, w: c.w, h: c.h } : r)));
+    return true;
+  }
+  function toGrid(e) {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const box = svg.getBoundingClientRect();
+    if (!box.width) return null;
+    return { gx: ((e.clientX - box.left) * (vbW / box.width) - GPAD) / CELL, gy: ((e.clientY - box.top) * (vbH / box.height) - GPAD) / CELL };
+  }
+  function startDrag(e, room, mode) {
+    e.stopPropagation();
+    setSelectedId(room.id); setConfirmDelete(false);
+    const g = toGrid(e);
+    if (!g) return;
+    dragRef.current = { id: room.id, mode, g0: g, r0: { x: room.x, y: room.y, w: room.w, h: room.h } };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (err) { /* not supported */ }
+  }
+  function onMove(e) {
+    const d = dragRef.current;
+    if (!d) return;
+    const g = toGrid(e);
+    if (!g) return;
+    const dx = Math.round(g.gx - d.g0.gx), dy = Math.round(g.gy - d.g0.gy);
+    if (d.mode === "move") tryRect(d.id, { x: d.r0.x + dx, y: d.r0.y + dy });
+    else tryRect(d.id, { w: d.r0.w + dx, h: d.r0.h + dy });
+  }
+  function addRoom() {
+    const spot = findFreeSpot(rooms);
+    if (!spot) { setFull(true); return; }
+    setFull(false);
+    const room = { id: `r-${crypto.randomUUID().slice(0, 8)}`, name: "New room", ...spot };
+    onChange([...rooms, room]);
+    setSelectedId(room.id); setConfirmDelete(false);
+  }
+  const tiedCount = selected ? roomProjects(selected.id, projects, layouts).length : 0;
+  const stepBtn = (label, onClick) => (
+    <button onClick={onClick} aria-label={label} style={{ background: BLUE.card, border: `1px solid ${BLUE.line}`, color: BLUE.bright }}
+      className="w-9 h-9 rounded-lg flex items-center justify-center">
+      {label === "Left" ? <ArrowLeft size={15} /> : label === "Right" ? <ArrowRight size={15} /> : label === "Up" ? <ArrowUp size={15} />
+        : label === "Down" ? <ArrowDown size={15} /> : label.startsWith("-") ? <Minus size={15} /> : <Plus size={15} />}
+    </button>
+  );
+
+  return (
+    <Screen bg={BLUE.bg} color={BLUE.bright}>
+      <Header title={`Edit layout · ${FLOOR_LABEL[level]}`} onBack={onClose} dark />
+      <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
+        <div style={{ background: BLUE.card, border: `1px solid ${BLUE.line}` }} className="rounded-2xl p-3">
+          <svg ref={svgRef} viewBox={`0 0 ${vbW} ${vbH}`} className="w-full h-auto block" style={{ touchAction: "none" }}
+            onPointerDown={() => { setSelectedId(null); setConfirmDelete(false); }}
+            onPointerMove={onMove} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}>
+            {Array.from({ length: GRID_COLS + 1 }, (_, i) => <line key={`v${i}`} x1={GPAD + i * CELL} y1={GPAD} x2={GPAD + i * CELL} y2={GPAD + GRID_ROWS * CELL} stroke="rgba(180,225,235,0.13)" strokeWidth="0.6" />)}
+            {Array.from({ length: GRID_ROWS + 1 }, (_, i) => <line key={`h${i}`} x1={GPAD} y1={GPAD + i * CELL} x2={GPAD + GRID_COLS * CELL} y2={GPAD + i * CELL} stroke="rgba(180,225,235,0.13)" strokeWidth="0.6" />)}
+            {rooms.map((r) => {
+              const sel = r.id === selectedId;
+              const n = roomProjects(r.id, projects, layouts).length;
+              const px = GPAD + r.x * CELL, py = GPAD + r.y * CELL, pw = r.w * CELL, ph = r.h * CELL;
+              return (
+                <g key={r.id} onPointerDown={(e) => startDrag(e, r, "move")} style={{ cursor: "move" }}>
+                  <rect x={px + 0.75} y={py + 0.75} width={pw - 1.5} height={ph - 1.5} rx="2" fill={BLUE.bgDeep} fillOpacity="0.85" stroke={sel ? BLUE.brass : BLUE.dim} strokeWidth={sel ? 2 : 1} />
+                  <text x={px + pw / 2} y={py + ph / 2 - (n ? 2 : -3)} fontSize="8.5" fill={BLUE.bright} textAnchor="middle" fontFamily="Inter, sans-serif" style={{ pointerEvents: "none" }}>{fitName(r.name, r.w)}</text>
+                  {n > 0 && <text x={px + pw / 2} y={py + ph / 2 + 9} fontSize="7.5" fill={BLUE.brass} textAnchor="middle" fontFamily="IBM Plex Mono, monospace" style={{ pointerEvents: "none" }}>{n} proj.</text>}
+                </g>
+              );
+            })}
+            {selected && (
+              <rect x={GPAD + (selected.x + selected.w) * CELL - 12} y={GPAD + (selected.y + selected.h) * CELL - 12} width="12" height="12" rx="2"
+                fill={BLUE.brass} onPointerDown={(e) => startDrag(e, selected, "resize")} style={{ cursor: "nwse-resize" }} />
+            )}
+          </svg>
+        </div>
+
+        {selected ? (
+          <div style={{ background: BLUE.card, border: `1px solid ${BLUE.line}` }} className="rounded-xl p-3.5 space-y-3">
+            <input value={selected.name} onChange={(e) => onChange(rooms.map((r) => (r.id === selected.id ? { ...r, name: e.target.value } : r)))}
+              placeholder="Room name" style={{ background: BLUE.bgDeep, border: `1px solid ${BLUE.line}`, color: BLUE.bright }}
+              className="w-full px-3 py-2.5 rounded-lg text-[14px] outline-none" />
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div style={{ color: BLUE.dim }} className="text-[10.5px] mb-1 tracking-wide">WIDTH</div>
+                <div className="flex items-center gap-2">{stepBtn("-W", () => tryRect(selected.id, { w: selected.w - 1 }))}
+                  <span style={{ fontFamily: MONO }} className="w-5 text-center text-[13px]">{selected.w}</span>{stepBtn("+W", () => tryRect(selected.id, { w: selected.w + 1 }))}</div>
+              </div>
+              <div>
+                <div style={{ color: BLUE.dim }} className="text-[10.5px] mb-1 tracking-wide">HEIGHT</div>
+                <div className="flex items-center gap-2">{stepBtn("-H", () => tryRect(selected.id, { h: selected.h - 1 }))}
+                  <span style={{ fontFamily: MONO }} className="w-5 text-center text-[13px]">{selected.h}</span>{stepBtn("+H", () => tryRect(selected.id, { h: selected.h + 1 }))}</div>
+              </div>
+              <div>
+                <div style={{ color: BLUE.dim }} className="text-[10.5px] mb-1 tracking-wide">MOVE</div>
+                <div className="flex items-center gap-1.5">{stepBtn("Left", () => tryRect(selected.id, { x: selected.x - 1 }))}{stepBtn("Up", () => tryRect(selected.id, { y: selected.y - 1 }))}
+                  {stepBtn("Down", () => tryRect(selected.id, { y: selected.y + 1 }))}{stepBtn("Right", () => tryRect(selected.id, { x: selected.x + 1 }))}</div>
+              </div>
+            </div>
+            {confirmDelete ? (
+              <div style={{ background: BLUE.bgDeep }} className="rounded-lg p-3">
+                <p style={{ color: BLUE.bright }} className="text-[12.5px] leading-relaxed">
+                  Remove “{selected.name || "this room"}”?{tiedCount ? ` Its ${tiedCount} project${tiedCount > 1 ? "s" : ""} will stay on this floor as “Not placed in a room.”` : ""}
+                </p>
+                <div className="flex gap-2 mt-2.5">
+                  <button onClick={() => { onChange(rooms.filter((r) => r.id !== selected.id)); setSelectedId(null); setConfirmDelete(false); }}
+                    style={{ background: BLUE.brass, color: BLUE.bgDeep }} className="flex-1 py-2 rounded-lg text-[13px] font-semibold">Remove</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ border: `1px solid ${BLUE.line}`, color: BLUE.dim }} className="flex-1 py-2 rounded-lg text-[13px]">Keep</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDelete(true)} style={{ color: BLUE.brass }} className="text-[12.5px] font-semibold flex items-center gap-1.5">
+                <Trash2 size={13} /> Remove this room
+              </button>
+            )}
+          </div>
+        ) : (
+          <p style={{ color: BLUE.dim }} className="text-[12px] leading-relaxed">
+            Tap a block to select it. Drag to move it, or drag the gold corner to resize. Keep it simple — blocks and names are all that's needed.
+          </p>
+        )}
+
+        <button onClick={addRoom} style={{ background: BLUE.brass, color: BLUE.bgDeep }} className="w-full py-3 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2">
+          <Plus size={16} /> Add a room
+        </button>
+        {full && <p style={{ color: BLUE.brass }} className="text-[12px]">There's no free space left on this floor — resize or remove a block first.</p>}
+        {DEFAULT_LAYOUTS[level] && (
+          <button onClick={() => { onReset(); setSelectedId(null); setConfirmDelete(false); }} style={{ color: BLUE.dim }} className="w-full text-[12px] py-1">
+            Reset this floor to the starter layout
+          </button>
+        )}
+      </div>
+    </Screen>
+  );
+}
+
+// "Where in the house" — used in Add Project and Project Detail.
+function LocationEditor({ value, layouts, category, onChange }) {
+  const [open, setOpen] = useState(false);
+  const rooms = value.rooms || [], floors = value.floors || [];
+  const levels = FLOOR_ORDER.filter((lv) => (layouts[lv] || []).length > 0);
+  const labels = projectPlacements({ rooms, floors, category }, layouts).filter((x) => !x.inferred).map((x) => placementLabel(x, layouts));
+  const chip = (active, text, onClick, key) => (
+    <button key={key} onClick={onClick}
+      style={{ background: active ? COLOR.teal : COLOR.card, color: active ? "#fff" : COLOR.ink, border: `1.5px solid ${active ? COLOR.teal : COLOR.line}` }}
+      className="px-3 py-1.5 rounded-full text-[12.5px] font-medium">{text}</button>
+  );
+  function toggleRoom(id, level) {
+    if (rooms.includes(id)) onChange({ rooms: rooms.filter((r) => r !== id), floors });
+    else onChange({ rooms: [...rooms, id], floors: floors.filter((f) => f !== level) });
+  }
+  function toggleFloor(level) {
+    if (floors.includes(level)) onChange({ rooms, floors: floors.filter((f) => f !== level) });
+    else onChange({ rooms: rooms.filter((id) => !(layouts[level] || []).some((r) => r.id === id)), floors: [...floors, level] });
+  }
+  return (
+    <div>
+      {labels.length > 0
+        ? <div className="flex flex-wrap gap-1.5">{labels.map((l) => <Pill key={l} tone="teal">{l}</Pill>)}</div>
+        : <p style={{ color: COLOR.inkSoft }} className="text-[12.5px] leading-relaxed">
+            Not set — it will show on the {FLOOR_LABEL[LEVEL_OF_CATEGORY[category] || "1st"]} until you choose rooms.
+          </p>}
+      <button onClick={() => setOpen(!open)} style={{ color: COLOR.teal }} className="text-[13px] font-semibold mt-2">
+        {open ? "Done choosing" : labels.length ? "Change rooms" : "Choose rooms"}
+      </button>
+      {open && (
+        <div style={{ background: COLOR.card, border: `1.5px solid ${COLOR.line}` }} className="rounded-xl p-3 mt-2 space-y-3">
+          {levels.map((lv) => (
+            <div key={lv}>
+              <div style={{ color: COLOR.inkSoft }} className="text-[11.5px] font-semibold tracking-wide mb-1.5">{FLOOR_LABEL[lv].toUpperCase()}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {chip(floors.includes(lv), "Whole floor", () => toggleFloor(lv), `${lv}-all`)}
+                {layouts[lv].map((r) => chip(rooms.includes(r.id), r.name || "Room", () => toggleRoom(r.id, lv), r.id))}
+              </div>
+            </div>
+          ))}
+          <p style={{ color: COLOR.inkSoft }} className="text-[11.5px] leading-relaxed">Pick every room the work touched. You can lay out your own rooms from the Home Report → Floors tab.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------
    HOUSE VIEW — anatomy-style isometric house + per-level floorplan.
    Two visual themes (kept as a permanent toggle, not a decision we made
    for the user): a dark "anatomy" render and a light muted "sketch model."
@@ -971,13 +1867,14 @@ const DEFAULT_MANUAL_FEATURES = {
   basement: true, secondFloor: true, attic: true,
   frontYard: true, backYard: true, driveway: true, deck: false,
 };
-function computeImpliedFeatures(projects) {
+function computeImpliedFeatures(projects, layouts) {
   const implied = {};
   projects.forEach((p) => {
-    const level = LEVEL_OF_CATEGORY[p.category];
-    if (level === "basement") implied.basement = true;
-    if (level === "2nd") implied.secondFloor = true;
-    if (level === "attic") implied.attic = true;
+    projectPlacements(p, layouts).forEach(({ level }) => {
+      if (level === "basement") implied.basement = true;
+      if (level === "2nd") implied.secondFloor = true;
+      if (level === "attic") implied.attic = true;
+    });
     if (p.category === "Deck") implied.deck = true;
     if (p.category === "Driveway") implied.driveway = true;
     if (p.category === "Landscaping") implied.backYard = true;
@@ -1116,49 +2013,38 @@ function IsoHouse({ theme, layer, features, projects, onHotspot, onBand }) {
   );
 }
 
-const HOUSE_FLOORPLANS = {
-  basement: { rooms: [
-    { name: "Utility Room", x: 10, y: 10, w: 120, h: 90, categories: ["HVAC", "Electrical"] },
-    { name: "Mechanical", x: 140, y: 10, w: 110, h: 90, categories: ["Plumbing"] },
-    { name: "Storage", x: 10, y: 110, w: 240, h: 60, categories: [] },
-  ]},
-  "1st": { rooms: [
-    { name: "Kitchen", x: 10, y: 10, w: 100, h: 90, categories: ["Kitchen"] },
-    { name: "Living Room", x: 120, y: 10, w: 130, h: 90, categories: ["Flooring"] },
-    { name: "Entry", x: 10, y: 110, w: 60, h: 60, categories: ["Doors"] },
-    { name: "Dining", x: 80, y: 110, w: 90, h: 60, categories: ["Other"] },
-    { name: "Deck / Patio", x: 180, y: 110, w: 70, h: 60, categories: ["Deck", "Patio"] },
-  ]},
-  "2nd": { rooms: [
-    { name: "Primary Bedroom", x: 10, y: 10, w: 120, h: 90, categories: [] },
-    { name: "Primary Bath", x: 140, y: 10, w: 110, h: 90, categories: ["Bathroom"] },
-    { name: "Bedroom 2", x: 10, y: 110, w: 110, h: 60, categories: [] },
-    { name: "Hall", x: 130, y: 110, w: 120, h: 60, categories: ["Windows"] },
-  ]},
-  attic: { rooms: [{ name: "Attic Storage", x: 10, y: 10, w: 240, h: 160, categories: ["Roof"] }] },
-  exterior: { rooms: [
-    { name: "Driveway", x: 10, y: 10, w: 110, h: 160, categories: ["Driveway"] },
-    { name: "Yard", x: 130, y: 10, w: 120, h: 160, categories: ["Landscaping"] },
-  ]},
-};
-
-function HouseFloorplan({ theme, level, projects, onRoom }) {
+function HouseFloorplan({ theme, level, projects, layouts, onRoom, onEditLayout }) {
   const t = HOUSE_THEMES[theme];
-  const plan = HOUSE_FLOORPLANS[level];
+  const rooms = layouts[level] || [];
+  const unplaced = projects.filter((p) => projectPlacements(p, layouts).some((x) => x.level === level && !x.roomId));
+  // Crop to the rooms so a half-used grid doesn't leave dead space.
+  const bx0 = rooms.length ? Math.min(...rooms.map((r) => r.x)) : 0, by0 = rooms.length ? Math.min(...rooms.map((r) => r.y)) : 0;
+  const bx1 = rooms.length ? Math.max(...rooms.map((r) => r.x + r.w)) : GRID_COLS, by1 = rooms.length ? Math.max(...rooms.map((r) => r.y + r.h)) : GRID_ROWS;
+  const vb = `${GPAD + bx0 * CELL - 4} ${GPAD + by0 * CELL - 4} ${(bx1 - bx0) * CELL + 8} ${(by1 - by0) * CELL + 8}`;
   return (
     <div style={{ background: t.card, border: `1px solid ${t.line}` }} className="rounded-2xl p-3">
-      <svg viewBox="0 0 260 180" className="w-full h-auto block">
-        {plan.rooms.map((r) => {
-          const count = projects.filter((p) => r.categories.includes(p.category)).length;
+      <svg viewBox={vb} className="w-full h-auto block">
+        {rooms.map((r) => {
+          const items = roomProjects(r.id, projects, layouts);
+          const count = items.length;
+          const px = GPAD + r.x * CELL, py = GPAD + r.y * CELL, pw = r.w * CELL, ph = r.h * CELL;
           return (
-            <g key={r.name} onClick={() => onRoom(r)} className="cursor-pointer">
-              <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={count ? t.wallFront : t.cardAlt} stroke={t.lineBright} strokeWidth="1.2" />
-              <text x={r.x + r.w / 2} y={r.y + r.h / 2 - (count ? 6 : 0)} fontSize="9.5" fill={t.bright} textAnchor="middle" fontFamily="Inter, sans-serif">{r.name}</text>
-              {count > 0 && <text x={r.x + r.w / 2} y={r.y + r.h / 2 + 9} fontSize="8" fill={t.amber} textAnchor="middle" fontFamily="monospace">{count} project{count > 1 ? "s" : ""}</text>}
+            <g key={r.id} onClick={() => onRoom(r, items)} className="cursor-pointer">
+              <rect x={px + 0.75} y={py + 0.75} width={pw - 1.5} height={ph - 1.5} fill={count ? t.wallFront : t.cardAlt} stroke={t.lineBright} strokeWidth="1.2" />
+              <text x={px + pw / 2} y={py + ph / 2 + (count ? -2 : 3)} fontSize="8.5" fill={t.bright} textAnchor="middle" fontFamily="Inter, sans-serif">{fitName(r.name, r.w)}</text>
+              {count > 0 && <text x={px + pw / 2} y={py + ph / 2 + 9} fontSize="7.5" fill={t.amber} textAnchor="middle" fontFamily="monospace">{r.w >= 3 ? `${count} project${count > 1 ? "s" : ""}` : count}</text>}
             </g>
           );
         })}
       </svg>
+      <div className="flex items-center justify-between mt-2 gap-2">
+        <span style={{ color: t.dim }} className="text-[11px] leading-snug">
+          {unplaced.length ? `${unplaced.length} project${unplaced.length > 1 ? "s" : ""} on this floor not placed in a room` : ""}
+        </span>
+        <button onClick={() => onEditLayout(level)} style={{ color: t.amber, border: `1px solid ${t.line}` }} className="px-2.5 py-1 rounded-full text-[10.5px] font-semibold whitespace-nowrap">
+          Edit layout
+        </button>
+      </div>
     </div>
   );
 }
@@ -1247,22 +2133,16 @@ function HouseBottomSheet({ theme, title, projects, onClose }) {
   );
 }
 
-function HouseView({ projects }) {
+function HouseView({ projects, layouts, features, implied, manualFeatures, setManualFeatures, onEditLayout }) {
   const [theme, setTheme] = useState("anatomy");
   const [mode, setMode] = useState("iso");
   const [layer, setLayer] = useState("structural");
   const [level, setLevel] = useState("1st");
   const [sheet, setSheet] = useState(null);
   const [showFeatures, setShowFeatures] = useState(false);
-  const [manualFeatures, setManualFeatures] = useState(DEFAULT_MANUAL_FEATURES);
 
   const t = HOUSE_THEMES[theme];
-  const implied = computeImpliedFeatures(projects);
-  const features = {};
-  Object.keys(FEATURE_LABEL).forEach((k) => { features[k] = manualFeatures[k] || !!implied[k]; });
-
-  const availableLevels = HOUSE_LEVELS.filter((lv) =>
-    lv === "1st" || lv === "exterior" || (lv === "2nd" ? features.secondFloor : lv === "attic" ? features.attic : features.basement));
+  const availableLevels = availableLevelsFor(features);
 
   return (
     <div className="space-y-2.5">
@@ -1313,8 +2193,8 @@ function HouseView({ projects }) {
               </button>
             ))}
           </div>
-          <HouseFloorplan theme={theme} level={level} projects={projects}
-            onRoom={(r) => setSheet({ title: r.name, projects: projects.filter((p) => r.categories.includes(p.category)) })} />
+          <HouseFloorplan theme={theme} level={level} projects={projects} layouts={layouts}
+            onRoom={(r, items) => setSheet({ title: r.name || "Room", projects: items })} onEditLayout={onEditLayout} />
         </>
       )}
 
@@ -1407,8 +2287,9 @@ function ReportOverview({ property, projects, onExport, exportState }) {
   );
 }
 
-function HomeReport({ property, projects, onBack, onExport, exportState }) {
-  const [tab, setTab] = useState("overview");
+function HomeReport({ property, projects, layouts, features, implied, manualFeatures, setManualFeatures, tab, setTab, pivotOpen, setPivotOpen,
+  onSaveLayout, onOpenProject, onBack, onExport, exportState }) {
+  const [editingLevel, setEditingLevel] = useState(null);
 
   return (
     <Screen bg={BLUE.bg} color={BLUE.bright}>
@@ -1419,7 +2300,7 @@ function HomeReport({ property, projects, onBack, onExport, exportState }) {
       </div>
 
       <div className="px-5 mt-4 flex gap-2">
-        {[{ key: "overview", label: "Overview" }, { key: "house", label: "House" }].map((tb) => (
+        {[{ key: "overview", label: "Overview" }, { key: "floors", label: "Floors" }, { key: "house", label: "House" }].map((tb) => (
           <button key={tb.key} onClick={() => setTab(tb.key)}
             style={{
               background: tab === tb.key ? BLUE.brass : "transparent",
@@ -1432,10 +2313,25 @@ function HomeReport({ property, projects, onBack, onExport, exportState }) {
       </div>
 
       <div className="flex-1 overflow-auto px-5 py-4">
-        {tab === "overview"
-          ? <ReportOverview property={property} projects={projects} onExport={onExport} exportState={exportState} />
-          : <HouseView projects={projects} />}
+        {tab === "overview" && <ReportOverview property={property} projects={projects} onExport={onExport} exportState={exportState} />}
+        {tab === "floors" && (
+          <FloorsPivot projects={projects} layouts={layouts} levels={availableLevelsFor(features)}
+            expanded={pivotOpen} setExpanded={setPivotOpen} onOpenProject={onOpenProject} onEditLayout={setEditingLevel} />
+        )}
+        {tab === "house" && (
+          <HouseView projects={projects} layouts={layouts} features={features} implied={implied}
+            manualFeatures={manualFeatures} setManualFeatures={setManualFeatures} onEditLayout={setEditingLevel} />
+        )}
       </div>
+
+      {editingLevel && (
+        <div className="absolute inset-0 z-40">
+          <LayoutEditor level={editingLevel} rooms={layouts[editingLevel] || []} projects={projects} layouts={layouts}
+            onChange={(rooms) => onSaveLayout(editingLevel, rooms)}
+            onReset={() => onSaveLayout(editingLevel, cloneRooms(DEFAULT_LAYOUTS[editingLevel] || []))}
+            onClose={() => setEditingLevel(null)} />
+        </div>
+      )}
     </Screen>
   );
 }
@@ -1479,6 +2375,12 @@ export default function App() {
   const [screen, setScreen] = useState("dashboard");
   const [draft, setDraft] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [detailFrom, setDetailFrom] = useState("dashboard");
+  const [draws, setDraws] = useState(SAMPLE_DRAWS);
+  const [layouts, setLayouts] = useState(() => cloneLayouts(DEFAULT_LAYOUTS));
+  const [manualFeatures, setManualFeatures] = useState(DEFAULT_MANUAL_FEATURES);
+  const [reportTab, setReportTab] = useState("overview");
+  const [pivotOpen, setPivotOpen] = useState({});
   const [exportState, setExportState] = useState("idle"); // idle | working | done | error
 
   async function handleExport() {
@@ -1495,6 +2397,46 @@ export default function App() {
     }
   }
 
+  function openProject(id) { setSelectedId(id); setDetailFrom(screen); setScreen("detail"); }
+  // Creates a draw (no id) or updates one (id). Returns the saved draw.
+  function saveDraw(data, id) {
+    if (id) {
+      setDraws((ds) => ds.map((d) => (d.id === id ? { ...d, ...data } : d)));
+      return { id, ...data };
+    }
+    const draw = { id: crypto.randomUUID(), ...data };
+    setDraws((ds) => [draw, ...ds]);
+    return draw;
+  }
+  function deleteDraw(id) {
+    setDraws((ds) => ds.filter((d) => d.id !== id));
+    setProjects((ps) => ps.map((p) => ({ ...p, funding: (p.funding || []).filter((f) => f.drawId !== id) })));
+  }
+  // Saves one floor's rooms. Projects tied to a removed room keep their floor.
+  function saveLayout(level, rooms) {
+    const removed = (layouts[level] || []).map((r) => r.id).filter((id) => !rooms.some((r) => r.id === id));
+    setLayouts((l) => ({ ...l, [level]: rooms }));
+    if (removed.length) {
+      setProjects((ps) => ps.map((p) => {
+        if (!(p.rooms || []).some((id) => removed.includes(id))) return p;
+        const left = p.rooms.filter((id) => !removed.includes(id));
+        const stillHere = left.some((id) => rooms.some((r) => r.id === id));
+        const floors = stillHere || (p.floors || []).includes(level) ? (p.floors || []) : [...(p.floors || []), level];
+        return { ...p, rooms: left, floors };
+      }));
+    }
+  }
+  function updateLocation(projectId, loc) {
+    setProjects((ps) => ps.map((p) => (p.id === projectId ? { ...p, rooms: loc.rooms, floors: loc.floors } : p)));
+  }
+  const impliedFeatures = computeImpliedFeatures(projects, layouts);
+  const features = {};
+  Object.keys(FEATURE_LABEL).forEach((k) => { features[k] = manualFeatures[k] || !!impliedFeatures[k]; });
+
+  function updateFunding(projectId, funding) {
+    setProjects((ps) => ps.map((p) => (p.id === projectId ? { ...p, funding } : p)));
+  }
+
   if (!property) {
     return (
       <div style={{ width: "100%", maxWidth: 390, height: "100dvh", maxHeight: 780, margin: "0 auto", overflow: "hidden" }} className="rounded-[2rem] shadow-2xl">
@@ -1508,10 +2450,12 @@ export default function App() {
   if (screen === "dashboard") {
     body = <Dashboard property={property} projects={projects}
       onAdd={() => setScreen("add")}
-      onOpenProject={(id) => { setSelectedId(id); setScreen("detail"); }}
-      onOpenReport={() => setScreen("report")} />;
+      onOpenProject={openProject}
+      onOpenReport={() => setScreen("report")}
+      onOpenFunding={() => setScreen("funding")} />;
   } else if (screen === "add") {
-    body = <AddProject onCancel={() => setScreen("dashboard")} onNext={(d) => { setDraft(d); setScreen("classify"); }} />;
+    body = <AddProject initial={draft} draws={draws} layouts={layouts} onCreateDraw={(d) => saveDraw(d)}
+      onCancel={() => { setDraft(null); setScreen("dashboard"); }} onNext={(d) => { setDraft(d); setScreen("classify"); }} />;
   } else if (screen === "classify") {
     body = <ClassifyFlow draft={draft} onCancel={() => setScreen("add")}
       onDone={({ aiClassification, userClassification }) => {
@@ -1523,13 +2467,20 @@ export default function App() {
       }} />;
   } else if (screen === "detail") {
     const p = projects.find((x) => x.id === selectedId);
-    body = <ProjectDetail project={p} onBack={() => setScreen("dashboard")} />;
+    body = <ProjectDetail key={p.id} project={p} draws={draws} layouts={layouts} onBack={() => setScreen(detailFrom)}
+      onUpdateFunding={updateFunding} onUpdateLocation={updateLocation} onCreateDraw={(d) => saveDraw(d)} />;
   } else if (screen === "report") {
-    body = <HomeReport property={property} projects={projects} onBack={() => setScreen("dashboard")} onExport={handleExport} exportState={exportState} />;
+    body = <HomeReport property={property} projects={projects} layouts={layouts} features={features} implied={impliedFeatures}
+      manualFeatures={manualFeatures} setManualFeatures={setManualFeatures} tab={reportTab} setTab={setReportTab}
+      pivotOpen={pivotOpen} setPivotOpen={setPivotOpen} onSaveLayout={saveLayout} onOpenProject={openProject}
+      onBack={() => setScreen("dashboard")} onExport={handleExport} exportState={exportState} />;
   } else if (screen === "timeline") {
-    body = <Timeline projects={projects} onOpenProject={(id) => { setSelectedId(id); setScreen("detail"); }} />;
+    body = <Timeline projects={projects} onOpenProject={openProject} />;
+  } else if (screen === "funding") {
+    body = <FundingScreen projects={projects} draws={draws} onBack={() => setScreen("dashboard")}
+      onOpenProject={openProject} onSaveDraw={saveDraw} onDeleteDraw={deleteDraw} />;
   } else if (screen === "settings") {
-    body = <SettingsScreen property={property} onReset={() => { setProperty(null); setProjects([]); setScreen("dashboard"); }}
+    body = <SettingsScreen property={property} onReset={() => { setProperty(null); setProjects([]); setDraws([]); setDraft(null); setLayouts(cloneLayouts(DEFAULT_LAYOUTS)); setManualFeatures(DEFAULT_MANUAL_FEATURES); setPivotOpen({}); setReportTab("overview"); setScreen("dashboard"); }}
       onExport={handleExport} exportState={exportState} />;
   }
 
