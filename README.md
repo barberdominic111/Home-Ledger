@@ -57,6 +57,8 @@ homeledger/
 ├── vite.config.js
 ├── tailwind.config.js
 ├── postcss.config.js
+├── docs/
+│   └── ARCHITECTURE.md    How it works + code map
 └── src/
     ├── main.jsx           Mounts <App /> into #root
     ├── App.jsx            The entire app (screens, classification engine,
@@ -64,6 +66,8 @@ homeledger/
     │                       component you've been testing as an artifact
     └── index.css          Tailwind directives + page backdrop
 ```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a full walkthrough of the data model, classification engine, house view, and export.
 
 `App.jsx` is intentionally still one file for now, matching what's been
 tested — splitting it into `components/`, `lib/`, etc. is a reasonable
