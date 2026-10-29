@@ -35,11 +35,17 @@ homeledger/
 ├── vite.config.js
 ├── tailwind.config.js      scans index.html and src/**/*.{js,jsx}
 ├── postcss.config.js
-├── README.md               setup + Vercel deploy instructions
+├── README.md               setup, Vercel deploy, and phone-install instructions
+├── vercel.json             cache headers for sw.js, content-type for the manifest
+├── public/                 static files copied to the site root
+│   ├── manifest.webmanifest   PWA manifest (name, theme, icons)
+│   ├── sw.js                  minimal network-first service worker
+│   ├── favicon.svg
+│   └── icons/                 app icons (192, 512, maskable, Apple touch, favicon)
 ├── docs/
 │   └── ARCHITECTURE.md     this file
 └── src/
-    ├── main.jsx            mounts <App /> into #root
+    ├── main.jsx            mounts <App /> into #root; registers the service worker in production
     ├── App.jsx             the entire application (≈2,500 lines, see §4)
     └── index.css           Tailwind directives + page backdrop
 ```
