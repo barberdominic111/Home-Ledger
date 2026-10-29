@@ -48,6 +48,17 @@ vercel --prod # subsequent production deploys
 No environment variables are required — there's no backend and no AI API
 calls in this milestone.
 
+## Installing on a phone (PWA)
+
+HomeLedger is an installable web app. After deploying to Vercel over HTTPS:
+
+- **Android / Chrome:** open the site → menu (⋮) → **Install app** (or accept the install prompt). It opens full-screen with the HomeLedger icon.
+- **iPhone / Safari:** Share → **Add to Home Screen**. (iOS uses the Apple touch icon.)
+
+If you previously added a *shortcut* from an older deploy, **delete that shortcut first**, then reload the site once and install again — Chrome keeps the old shortcut's settings. To check the setup, open Chrome DevTools → **Application → Manifest** (it lists any installability problems).
+
+The service worker is intentionally simple: it always tries the network first so a new deploy shows up right away, and only falls back to a cached copy when offline. It doesn't make the app a full offline-first app, and your data is still memory-only for now (see limitations below).
+
 ## Project structure
 
 ```
@@ -57,6 +68,12 @@ homeledger/
 ├── vite.config.js
 ├── tailwind.config.js
 ├── postcss.config.js
+├── vercel.json           Cache headers for the service worker + manifest type
+├── public/               Copied as-is to the site root on build
+│   ├── manifest.webmanifest   Makes the app installable (name, colors, icons)
+│   ├── sw.js                  Minimal service worker (network-first, offline fallback)
+│   ├── favicon.svg
+│   └── icons/                 192/512 icons, maskable icon, Apple touch icon, 32px favicon
 ├── docs/
 │   └── ARCHITECTURE.md    How it works + code map
 └── src/
